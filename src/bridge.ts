@@ -29,7 +29,7 @@ export class WeChatAcpBridge {
 
   constructor(config: WeChatAcpConfig, log?: (msg: string) => void) {
     this.config = config;
-    this.log = log ?? ((msg: string) => console.log(`[wechat-acp] ${msg}`));
+    this.log = log ?? ((msg: string) => console.log(`[wechat-media-agent] ${msg}`));
   }
 
   async start(opts?: {
@@ -117,6 +117,7 @@ export class WeChatAcpBridge {
     const prompt = await weixinMessageToPrompt(
       msg,
       this.config.wechat.cdnBaseUrl,
+      this.config.storage.dir,
       this.log,
     );
 

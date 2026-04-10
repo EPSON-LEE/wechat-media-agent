@@ -1,5 +1,5 @@
 /**
- * Configuration types and defaults for wechat-acp.
+ * Configuration types and defaults for wechat-media-agent.
  */
 
 import path from "node:path";
@@ -91,7 +91,7 @@ export interface WeChatAcpConfig {
 }
 
 export function defaultStorageDir(): string {
-  return path.join(os.homedir(), ".wechat-acp");
+  return path.join(os.homedir(), ".wechat-media-agent");
 }
 
 export function defaultConfig(): WeChatAcpConfig {
@@ -116,7 +116,7 @@ export function defaultConfig(): WeChatAcpConfig {
     },
     daemon: {
       enabled: false,
-      logFile: path.join(storageDir, "wechat-acp.log"),
+      logFile: path.join(storageDir, "wechat-media-agent.log"),
       pidFile: path.join(storageDir, "daemon.pid"),
     },
     storage: {

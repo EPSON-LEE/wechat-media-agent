@@ -3,6 +3,8 @@
  */
 
 import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
 import type { WeixinMessage, MessageItem } from "../weixin/types.js";
 import { MessageItemType } from "../weixin/types.js";
@@ -42,9 +44,7 @@ function findMediaItem(itemList?: MessageItem[]): MessageItem | undefined {
     itemList.find((i) => i.type === MessageItemType.IMAGE && i.image_item?.media?.encrypt_query_param) ??
     itemList.find((i) => i.type === MessageItemType.VIDEO && i.video_item?.media?.encrypt_query_param) ??
     itemList.find((i) => i.type === MessageItemType.FILE && i.file_item?.media?.encrypt_query_param) ??
-    itemList.find(
-      (i) => i.type === MessageItemType.VOICE && i.voice_item?.media?.encrypt_query_param && !i.voice_item.text,
-    )
+    itemList.find((i) => i.type === MessageItemType.VOICE && i.voice_item?.media?.encrypt_query_param)
   );
 }
 
@@ -54,6 +54,7 @@ function findMediaItem(itemList?: MessageItem[]): MessageItem | undefined {
 export async function weixinMessageToPrompt(
   msg: WeixinMessage,
   cdnBaseUrl: string,
+  storageDir: string,
   log: (msg: string) => void,
 ): Promise<acp.ContentBlock[]> {
   const blocks: acp.ContentBlock[] = [];
@@ -68,8 +69,8 @@ export async function weixinMessageToPrompt(
   const mediaItem = findMediaItem(msg.item_list);
   if (mediaItem) {
     try {
-      const attached = await convertMediaItem(mediaItem, cdnBaseUrl, log);
-      if (attached) blocks.push(attached);
+      const attached = await convertMediaItem(mediaItem, cdnBaseUrl, storageDir, log);
+      blocks.push(...attached);
     } catch (err) {
       log(`Media download failed, skipping: ${String(err)}`);
       // Add a text note about the media
@@ -93,28 +94,57 @@ export async function weixinMessageToPrompt(
 async function convertMediaItem(
   item: MessageItem,
   cdnBaseUrl: string,
+  storageDir: string,
   log: (msg: string) => void,
-): Promise<acp.ContentBlock | null> {
+): Promise<acp.ContentBlock[]> {
   if (item.type === MessageItemType.IMAGE && item.image_item?.media) {
     const media = item.image_item.media;
     const aesKey = parseAesKey(media);
-    if (!aesKey || !media.encrypt_query_param) return null;
+    if (!aesKey || !media.encrypt_query_param) return [];
 
     log("Downloading image from CDN...");
     const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
+    const savedPath = await saveIncomingImage(buffer, storageDir);
     const base64 = buffer.toString("base64");
 
-    return {
-      type: "image",
-      data: base64,
-      mimeType: "image/jpeg",
-    } as acp.ContentBlock;
+    return [
+      {
+        type: "text",
+        text: `[Saved incoming image locally: ${savedPath}]`,
+      },
+      {
+        type: "image",
+        data: base64,
+        mimeType: "image/jpeg",
+      } as acp.ContentBlock,
+    ];
+  }
+
+  if (item.type === MessageItemType.VIDEO && item.video_item?.media) {
+    const media = item.video_item.media;
+    const aesKey = parseAesKey(media);
+    if (!aesKey || !media.encrypt_query_param) return [];
+
+    log("Downloading video from CDN...");
+    const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
+    const savedPath = await saveIncomingMedia(buffer, storageDir, "mp4");
+
+    return [
+      {
+        type: "text",
+        text: `[Saved incoming video locally: ${savedPath}]`,
+      },
+      {
+        type: "text",
+        text: "[Received video message]",
+      },
+    ];
   }
 
   if (item.type === MessageItemType.FILE && item.file_item?.media) {
     const media = item.file_item.media;
     const aesKey = parseAesKey(media);
-    if (!aesKey || !media.encrypt_query_param) return null;
+    if (!aesKey || !media.encrypt_query_param) return [];
 
     log(`Downloading file "${item.file_item.file_name}" from CDN...`);
     const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
@@ -123,30 +153,87 @@ async function convertMediaItem(
     const fileName = item.file_item.file_name ?? "file";
     if (isTextFile(fileName)) {
       const content = buffer.toString("utf-8");
-      return {
-        type: "resource",
-        resource: {
-          uri: `file:///${fileName}`,
-          mimeType: guessMimeType(fileName),
-          text: content,
-        },
-      } as acp.ContentBlock;
+      return [
+        {
+          type: "resource",
+          resource: {
+            uri: `file:///${fileName}`,
+            mimeType: guessMimeType(fileName),
+            text: content,
+          },
+        } as acp.ContentBlock,
+      ];
     }
 
-    return { type: "text", text: `[Received file: ${fileName}, ${buffer.length} bytes]` };
+    return [{ type: "text", text: `[Received file: ${fileName}, ${buffer.length} bytes]` }];
   }
 
   if (item.type === MessageItemType.VOICE && item.voice_item?.media) {
-    // If there's a transcription, it was already handled in extractText
-    // Otherwise, note we received voice
-    return { type: "text", text: "[Received voice message - no transcription available]" };
+    const media = item.voice_item.media;
+    const aesKey = parseAesKey(media);
+    if (!aesKey || !media.encrypt_query_param) return [];
+
+    log("Downloading voice from CDN...");
+    const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
+    const savedPath = await saveIncomingMedia(
+      buffer,
+      storageDir,
+      guessVoiceExtension(item.voice_item.encode_type),
+    );
+
+    const blocks: acp.ContentBlock[] = [
+      {
+        type: "text",
+        text: `[Saved incoming voice locally: ${savedPath}]`,
+      },
+    ];
+
+    if (!item.voice_item.text) {
+      blocks.push({ type: "text", text: "[Received voice message - no transcription available]" });
+    }
+
+    return blocks;
   }
 
   if (item.type === MessageItemType.VIDEO) {
-    return { type: "text", text: "[Received video message]" };
+    return [{ type: "text", text: "[Received video message]" }];
   }
 
-  return null;
+  return [];
+}
+
+async function saveIncomingImage(buffer: Buffer, storageDir: string): Promise<string> {
+  return saveIncomingMedia(buffer, storageDir, "jpg");
+}
+
+async function saveIncomingMedia(
+  buffer: Buffer,
+  storageDir: string,
+  extension: string,
+): Promise<string> {
+  const mediaDir = path.join(storageDir, "media", new Date().toISOString().slice(0, 10));
+  await fs.promises.mkdir(mediaDir, { recursive: true });
+  const fileName = `${Date.now()}-${crypto.randomUUID()}.${extension}`;
+  const filePath = path.join(mediaDir, fileName);
+  await fs.promises.writeFile(filePath, buffer);
+  return filePath;
+}
+
+function guessVoiceExtension(encodeType?: number): string {
+  switch (encodeType) {
+    case 1:
+      return "silk";
+    case 2:
+      return "amr";
+    case 3:
+      return "aac";
+    case 4:
+      return "mp3";
+    case 5:
+      return "wav";
+    default:
+      return "audio";
+  }
 }
 
 function isTextFile(name: string): boolean {

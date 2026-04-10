@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * wechat-acp CLI entry point.
+ * wechat-media-agent CLI entry point.
  *
  * Usage:
- *   wechat-acp --agent "claude code"
- *   wechat-acp --agent "gemini" --cwd /path/to/project
- *   wechat-acp --agent "npx tsx ./agent.ts" --login
- *   wechat-acp --agent "claude code" --daemon
- *   wechat-acp stop
- *   wechat-acp status
+ *   wechat-media-agent --agent "claude code"
+ *   wechat-media-agent --agent "gemini" --cwd /path/to/project
+ *   wechat-media-agent --agent "npx tsx ./agent.ts" --login
+ *   wechat-media-agent --agent "claude code" --daemon
+ *   wechat-media-agent stop
+ *   wechat-media-agent status
  */
 
 import fs from "node:fs";
@@ -30,13 +30,13 @@ function usage(): void {
     .join(", ");
 
   console.log(`
-wechat-acp — Bridge WeChat to any ACP-compatible AI agent
+wechat-media-agent — Bridge WeChat to any ACP-compatible AI agent
 
 Usage:
-  wechat-acp --agent <preset|command>  [options]
-  wechat-acp agents                        List built-in agent presets
-  wechat-acp stop                          Stop a running daemon
-  wechat-acp status                        Check daemon status
+  wechat-media-agent --agent <preset|command>  [options]
+  wechat-media-agent agents                        List built-in agent presets
+  wechat-media-agent stop                          Stop a running daemon
+  wechat-media-agent status                        Check daemon status
 
 Options:
   --agent <value>     Built-in preset name or raw agent command
@@ -202,7 +202,7 @@ function daemonize(config: WeChatAcpConfig): void {
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: ["ignore", out, err],
-    env: { ...process.env, WECHAT_ACP_DAEMON: "1" },
+    env: { ...process.env, WECHAT_MEDIA_AGENT_DAEMON: "1" },
   });
 
   child.unref();
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
   config.daemon.enabled = args.daemon;
 
   // Handle daemon mode
-  if (args.daemon && !process.env.WECHAT_ACP_DAEMON) {
+  if (args.daemon && !process.env.WECHAT_MEDIA_AGENT_DAEMON) {
     daemonize(config);
     return;
   }

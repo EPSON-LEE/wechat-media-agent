@@ -1,7 +1,7 @@
 {
-  "name": "wechat-acp",
-  "version": "0.1.2",
-  "description": "Bridge WeChat to any ACP-compatible AI agent",
+  "name": "wechat-media-agent",
+  "version": "0.1",
+  "description": "Bridge WeChat direct messages and media to any ACP-compatible AI agent",
   "type": "module",
   "files": [
     "dist/",
@@ -9,7 +9,7 @@
     "package.json"
   ],
   "bin": {
-    "wechat-acp": "./dist/bin/wechat-acp.js"
+    "wechat-media-agent": "./dist/bin/wechat-media-agent.js"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",
-    "start": "node dist/bin/wechat-acp.js",
+    "start": "node dist/bin/wechat-media-agent.js",
     "dev": "tsc --watch"
   },
   "dependencies": {
@@ -38,11 +38,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/formulahendry/wechat-acp.git"
+    "url": "git+https://github.com/EPSON-LEE/wechat-media-agent.git"
   },
-  "homepage": "https://github.com/formulahendry/wechat-acp#readme",
+  "homepage": "https://github.com/EPSON-LEE/wechat-media-agent#readme",
   "bugs": {
-    "url": "https://github.com/formulahendry/wechat-acp/issues"
+    "url": "https://github.com/EPSON-LEE/wechat-media-agent/issues"
   },
   "license": "MIT",
   "keywords": [
