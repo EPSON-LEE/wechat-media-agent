@@ -167,6 +167,16 @@ npx wechat-media-agent --agent gemini --daemon
 - 消息同步状态
 - 保存在 `media/YYYY-MM-DD/` 下的图片、视频、语音文件
 
+## 可选 Docker 部署
+
+如果希望长期运行 bridge/admin，可以使用 Docker Compose：
+
+```bash
+docker compose up --build
+```
+
+默认后台页面地址是 `http://127.0.0.1:8787`。Agent 选择、数据卷、端口和容器内限制见 [Docker 部署说明](./docs/docker.md)。
+
 ## 当前限制
 
 - 当前仅支持私聊消息，群聊消息会被忽略

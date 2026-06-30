@@ -1,0 +1,26 @@
+services:
+  wechat-media-agent:
+    build:
+      context: .
+    image: wechat-media-agent:local
+    command:
+      - --agent
+      - ${WECHAT_AGENT:-copilot}
+      - --cwd
+      - /workspace
+      - --admin
+      - --admin-host
+      - 0.0.0.0
+      - --admin-port
+      - "8787"
+    ports:
+      - "${ADMIN_PORT:-8787}:8787"
+    volumes:
+      - wechat-media-agent-data:/home/node/.wechat-media-agent
+      - ./workspace:/workspace
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  wechat-media-agent-data:

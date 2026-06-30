@@ -167,6 +167,16 @@ This directory is used for:
 - sync state
 - incoming images, videos, and voice messages saved under `media/YYYY-MM-DD/`
 
+## Optional Docker Deployment
+
+Docker is available for long-running bridge/admin deployments:
+
+```bash
+docker compose up --build
+```
+
+The admin pages are exposed at `http://127.0.0.1:8787` by default. See [Docker Deployment](./docs/docker.md) for agent selection, volumes, ports, and container-specific limits.
+
 ## Current Limitations
 
 - Direct messages only; group chats are ignored
