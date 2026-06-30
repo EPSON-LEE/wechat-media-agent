@@ -22,7 +22,10 @@
   "scripts": {
     "build": "tsc",
     "prepack": "npm run build",
-    "start": "node dist/bin/wechat-media-agent.js",
+    "prestart": "npm run build",
+    "start": "node dist/bin/wechat-media-agent.js --agent codex --cwd . --admin",
+    "preadmin": "npm run build",
+    "admin": "node dist/bin/wechat-media-agent.js admin",
     "dev": "tsc --watch"
   },
   "dependencies": {

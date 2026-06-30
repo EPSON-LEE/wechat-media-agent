@@ -9,12 +9,15 @@ import { login, loadToken, type TokenData } from "./weixin/auth.js";
 import { startMonitor } from "./weixin/monitor.js";
 import { sendTextMessage, splitText } from "./weixin/send.js";
 import { sendTyping, getConfig } from "./weixin/api.js";
-import { TypingStatus, MessageType } from "./weixin/types.js";
+import { TypingStatus, MessageType, MessageItemType } from "./weixin/types.js";
 import type { WeixinMessage } from "./weixin/types.js";
 import { SessionManager } from "./acp/session.js";
 import { weixinMessageToPrompt } from "./adapter/inbound.js";
 import { formatForWeChat } from "./adapter/outbound.js";
 import type { WeChatAcpConfig } from "./config.js";
+import { appendChatRecord } from "./analytics/chat-store.js";
+import type { MediaRecord } from "./admin/settings.js";
+import type * as acp from "@agentclientprotocol/sdk";
 
 const TEXT_CHUNK_LIMIT = 4000;
 
@@ -114,12 +117,29 @@ export class WeChatAcpBridge {
     userId: string,
     contextToken: string,
   ): Promise<void> {
+    const mediaRecords: MediaRecord[] = [];
     const prompt = await weixinMessageToPrompt(
       msg,
       this.config.wechat.cdnBaseUrl,
       this.config.storage.dir,
       this.log,
+      {
+        onMediaSaved: (record) => mediaRecords.push(record),
+      },
     );
+
+    await appendChatRecord(this.config.storage.dir, {
+      userId,
+      direction: "inbound",
+      text: this.promptToText(prompt),
+      agent: this.config.agent.preset || this.config.agent.command,
+      contextToken,
+      messageType: this.messageTypeLabel(msg),
+      mediaIds: mediaRecords.map((record) => record.id),
+      mediaTypes: mediaRecords.map((record) => record.type),
+    }).catch((err) => {
+      this.log(`Failed to record inbound chat: ${String(err)}`);
+    });
 
     await this.sessionManager!.enqueue(userId, { prompt, contextToken });
   }
@@ -138,6 +158,19 @@ export class WeChatAcpBridge {
 
     // Cancel typing indicator after reply is sent
     this.cancelTypingIndicator(userId, contextToken).catch(() => {});
+
+    await appendChatRecord(this.config.storage.dir, {
+      userId,
+      direction: "outbound",
+      text: formatted,
+      agent: this.config.agent.preset || this.config.agent.command,
+      contextToken,
+      messageType: "text",
+      mediaIds: [],
+      mediaTypes: [],
+    }).catch((err) => {
+      this.log(`Failed to record outbound chat: ${String(err)}`);
+    });
   }
 
   private async cancelTypingIndicator(userId: string, contextToken: string): Promise<void> {
@@ -212,5 +245,38 @@ export class WeChatAcpBridge {
       if (item.type === 5) return "[video]";
     }
     return "[empty]";
+  }
+
+  private promptToText(blocks: acp.ContentBlock[]): string {
+    return blocks
+      .map((block) => {
+        if (block.type === "text" && "text" in block) return block.text;
+        if (block.type === "image") return "[image]";
+        if (block.type === "resource" && "resource" in block) {
+          const resource = block.resource;
+          return "text" in resource ? resource.text : resource.uri ?? "[resource]";
+        }
+        return `[${block.type}]`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  private messageTypeLabel(msg: WeixinMessage): string {
+    const item = msg.item_list?.[0];
+    switch (item?.type) {
+      case MessageItemType.TEXT:
+        return "text";
+      case MessageItemType.IMAGE:
+        return "image";
+      case MessageItemType.VOICE:
+        return "voice";
+      case MessageItemType.FILE:
+        return "file";
+      case MessageItemType.VIDEO:
+        return "video";
+      default:
+        return "unknown";
+    }
   }
 }

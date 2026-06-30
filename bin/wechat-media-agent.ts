@@ -17,6 +17,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import qrcodeTerminal from "qrcode-terminal";
 import { WeChatAcpBridge } from "../src/bridge.js";
+import { startAdminServer } from "../src/admin/server.js";
 import {
   defaultConfig,
   listBuiltInAgents,
@@ -37,6 +38,7 @@ Usage:
   wechat-media-agent agents                        List built-in agent presets
   wechat-media-agent stop                          Stop a running daemon
   wechat-media-agent status                        Check daemon status
+  wechat-media-agent admin                         Start admin pages only
 
 Options:
   --agent <value>     Built-in preset name or raw agent command
@@ -50,6 +52,9 @@ Options:
                       Use 0 to disable idle cleanup
   --max-sessions <n>  Max concurrent user sessions (default: 10)
   --show-thoughts     Forward agent thinking to WeChat (default: off)
+  --admin             Start settings and media pages with the bridge
+  --admin-host <host> Admin host (default: 127.0.0.1)
+  --admin-port <port> Admin port (default: 8787)
   -v, --verbose       Verbose logging
   -h, --help          Show this help
 `);
@@ -65,6 +70,9 @@ function parseArgs(argv: string[]): {
   idleTimeout?: number;
   maxSessions?: number;
   showThoughts: boolean;
+  admin: boolean;
+  adminHost?: string;
+  adminPort?: number;
   verbose: boolean;
   help: boolean;
 } {
@@ -72,6 +80,7 @@ function parseArgs(argv: string[]): {
     forceLogin: false,
     daemon: false,
     showThoughts: false,
+    admin: false,
     verbose: false,
     help: false,
   } as ReturnType<typeof parseArgs>;
@@ -111,6 +120,15 @@ function parseArgs(argv: string[]): {
         break;
       case "--show-thoughts":
         result.showThoughts = true;
+        break;
+      case "--admin":
+        result.admin = true;
+        break;
+      case "--admin-host":
+        result.adminHost = args[++i];
+        break;
+      case "--admin-port":
+        result.adminPort = parseInt(args[++i], 10);
         break;
       case "-v":
       case "--verbose":
@@ -253,6 +271,18 @@ async function main(): Promise<void> {
     handleStatus(config);
     return;
   }
+  if (args.command === "admin") {
+    await startAdminServer({
+      storageDir: config.storage.dir,
+      host: args.adminHost ?? "127.0.0.1",
+      port: args.adminPort ?? 8787,
+      log: (msg) => {
+        const ts = new Date().toISOString().substring(11, 19);
+        console.log(`[${ts}] ${msg}`);
+      },
+    });
+    await new Promise(() => {});
+  }
 
   const agentSelection = args.agent ?? config.agent.preset;
 
@@ -293,6 +323,18 @@ async function main(): Promise<void> {
   }
 
   // Create and start bridge
+  if (args.admin) {
+    await startAdminServer({
+      storageDir: config.storage.dir,
+      host: args.adminHost ?? "127.0.0.1",
+      port: args.adminPort ?? 8787,
+      log: (msg) => {
+        const ts = new Date().toISOString().substring(11, 19);
+        console.log(`[${ts}] ${msg}`);
+      },
+    });
+  }
+
   const bridge = new WeChatAcpBridge(config, (msg) => {
     const ts = new Date().toISOString().substring(11, 19);
     console.log(`[${ts}] ${msg}`);

@@ -9,6 +9,18 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type { WeixinMessage, MessageItem } from "../weixin/types.js";
 import { MessageItemType } from "../weixin/types.js";
 import { parseAesKey, downloadAndDecrypt } from "../weixin/media.js";
+import {
+  buildPublicMediaUrl,
+  loadAdminSettings,
+  publicPromptLine,
+  recordMedia,
+  resolveMediaRoot,
+  type MediaRecord,
+} from "../admin/settings.js";
+
+export interface InboundConversionOptions {
+  onMediaSaved?: (record: MediaRecord) => void;
+}
 
 /**
  * Extract text body from a WeChat message's item_list.
@@ -56,6 +68,7 @@ export async function weixinMessageToPrompt(
   cdnBaseUrl: string,
   storageDir: string,
   log: (msg: string) => void,
+  options: InboundConversionOptions = {},
 ): Promise<acp.ContentBlock[]> {
   const blocks: acp.ContentBlock[] = [];
 
@@ -69,7 +82,7 @@ export async function weixinMessageToPrompt(
   const mediaItem = findMediaItem(msg.item_list);
   if (mediaItem) {
     try {
-      const attached = await convertMediaItem(mediaItem, cdnBaseUrl, storageDir, log);
+      const attached = await convertMediaItem(mediaItem, cdnBaseUrl, storageDir, log, options);
       blocks.push(...attached);
     } catch (err) {
       log(`Media download failed, skipping: ${String(err)}`);
@@ -96,6 +109,7 @@ async function convertMediaItem(
   cdnBaseUrl: string,
   storageDir: string,
   log: (msg: string) => void,
+  options: InboundConversionOptions,
 ): Promise<acp.ContentBlock[]> {
   if (item.type === MessageItemType.IMAGE && item.image_item?.media) {
     const media = item.image_item.media;
@@ -104,13 +118,14 @@ async function convertMediaItem(
 
     log("Downloading image from CDN...");
     const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
-    const savedPath = await saveIncomingImage(buffer, storageDir);
+    const saved = await saveIncomingImage(buffer, storageDir);
+    options.onMediaSaved?.(saved.record);
     const base64 = buffer.toString("base64");
 
     return [
       {
         type: "text",
-        text: `[Saved incoming image locally: ${savedPath}]`,
+        text: formatSavedMediaNote(saved),
       },
       {
         type: "image",
@@ -127,12 +142,13 @@ async function convertMediaItem(
 
     log("Downloading video from CDN...");
     const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
-    const savedPath = await saveIncomingMedia(buffer, storageDir, "mp4");
+    const saved = await saveIncomingMedia(buffer, storageDir, "video", "mp4");
+    options.onMediaSaved?.(saved.record);
 
     return [
       {
         type: "text",
-        text: `[Saved incoming video locally: ${savedPath}]`,
+        text: formatSavedMediaNote(saved),
       },
       {
         type: "text",
@@ -175,16 +191,18 @@ async function convertMediaItem(
 
     log("Downloading voice from CDN...");
     const buffer = await downloadAndDecrypt(media.encrypt_query_param, aesKey, cdnBaseUrl);
-    const savedPath = await saveIncomingMedia(
+    const saved = await saveIncomingMedia(
       buffer,
       storageDir,
+      "voice",
       guessVoiceExtension(item.voice_item.encode_type),
     );
+    options.onMediaSaved?.(saved.record);
 
     const blocks: acp.ContentBlock[] = [
       {
         type: "text",
-        text: `[Saved incoming voice locally: ${savedPath}]`,
+        text: formatSavedMediaNote(saved),
       },
     ];
 
@@ -202,21 +220,53 @@ async function convertMediaItem(
   return [];
 }
 
-async function saveIncomingImage(buffer: Buffer, storageDir: string): Promise<string> {
-  return saveIncomingMedia(buffer, storageDir, "jpg");
+async function saveIncomingImage(buffer: Buffer, storageDir: string): Promise<SavedIncomingMedia> {
+  return saveIncomingMedia(buffer, storageDir, "image", "jpg");
+}
+
+interface SavedIncomingMedia {
+  record: MediaRecord;
+  promptText: string;
 }
 
 async function saveIncomingMedia(
   buffer: Buffer,
   storageDir: string,
+  mediaType: MediaRecord["type"],
   extension: string,
-): Promise<string> {
-  const mediaDir = path.join(storageDir, "media", new Date().toISOString().slice(0, 10));
+): Promise<SavedIncomingMedia> {
+  const settings = loadAdminSettings(storageDir);
+  const datePart = new Date().toISOString().slice(0, 10);
+  const mediaDir = path.join(resolveMediaRoot(storageDir, settings), datePart);
   await fs.promises.mkdir(mediaDir, { recursive: true });
   const fileName = `${Date.now()}-${crypto.randomUUID()}.${extension}`;
+  const datedFileName = `${datePart}/${fileName}`;
   const filePath = path.join(mediaDir, fileName);
   await fs.promises.writeFile(filePath, buffer);
-  return filePath;
+
+  const record: MediaRecord = {
+    id: crypto.randomUUID(),
+    type: mediaType,
+    fileName,
+    localPath: filePath,
+    publicUrl: buildPublicMediaUrl(storageDir, datedFileName, settings),
+    size: buffer.length,
+    createdAt: new Date().toISOString(),
+  };
+
+  await recordMedia(storageDir, record);
+
+  const publicLine = publicPromptLine(record, settings);
+  return {
+    record,
+    promptText: publicLine
+      ? `Saved incoming ${mediaType} locally: ${filePath}\n${publicLine}`
+      : `Saved incoming ${mediaType} locally: ${filePath}`,
+  };
+}
+
+function formatSavedMediaNote(saved: SavedIncomingMedia): string {
+  return `[${saved.promptText}]`;
 }
 
 function guessVoiceExtension(encodeType?: number): string {
